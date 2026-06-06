@@ -115,7 +115,13 @@ TRANSMIT_SCHEMA = cv.Schema(
 
 
 @automation.register_action(
-    "mantra_rf_433.transmit", TransmitMantraRf433Action, TRANSMIT_SCHEMA
+    "mantra_rf_433.transmit",
+    TransmitMantraRf433Action,
+    TRANSMIT_SCHEMA,
+    # The action only overrides play() (not play_complex()), so play_next_()
+    # always runs before play_complex() returns — nothing is deferred to a
+    # callback/timer/loop(). Hence synchronous=True (enables StringRef opt).
+    synchronous=True,
 )
 async def transmit_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_BRIDGE_ID])
