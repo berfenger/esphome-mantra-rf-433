@@ -1,0 +1,4 @@
+.esphome
+.directory
+*.pyc
+__pycache__

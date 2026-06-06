@@ -1,0 +1,241 @@
+# Example: mantra_rf_433 on an M5Stack ATOM Lite + CC1101 (dual data pin)
+#
+# Two Mantra 433 MHz ceiling fans (R00143 / R00149 family) sharing one bridge,
+# each exposing a CCT LED (brightness + 3000K..5000K) and a 6-speed reversible
+# fan with Normal / Night / Breeze preset modes. Does NOT cover Mantra's 2.4 GHz
+# BLE fans — those use a different protocol entirely.
+#
+# "Dual data pin" CC1101: TX data and RX data use two separate GPIOs (GDO0 for
+# TX, GDO2 for RX) instead of sharing one line, so the receiver can stay wired
+# while the transmitter drives its own pin.
+
+substitutions:
+  hostname: mantra-rf-bridge
+  name: "Mantra RF Bridge"
+  pin_status_led: GPIO27    # ATOM Lite onboard RGB LED is wired to GPIO27
+  # CC1101 wiring (see the comment above the spi:/cc1101: blocks):
+  pin_spi_clk: GPIO23       # CC1101 SCK
+  pin_spi_mosi: GPIO19      # CC1101 MOSI
+  pin_spi_miso: GPIO33      # CC1101 MISO
+  pin_cc1101_cs: GPIO25     # CC1101 CS
+  pin_rf_tx: GPIO22         # CC1101 GDO0 (TX data)
+  pin_rf_rx: GPIO21         # CC1101 GDO2 (RX data)
+
+external_components:
+  - source: github://berfenger/esphome-mantra-rf-433
+    components: mantra_rf_433
+
+# NOTE: the `cc1101:` component used below is supported natively by ESPHome
+# from version 2025.12.0 onwards — no external component needed.
+
+esphome:
+  name: ${hostname}
+  friendly_name: ${name}
+  # CC1101 is supported natively only from ESPHome 2025.12.0 onwards.
+  min_version: 2025.12.0
+  # Optional: only needed if you publish this as an ESPHome project.
+  project:
+    name: m5stack.atom_lite
+    version: "1.0"
+  # Per-fan HA devices so each fan's light + fan entity group together.
+  devices:
+    - id: livingroom_fan_dev
+      name: "Living Room Fan"
+      area_id: livingroom_area
+    - id: bedroom_fan_dev
+      name: "Bedroom Fan"
+      area_id: bedroom_area
+  areas:
+    - id: livingroom_area
+      name: "Living Room"
+    - id: bedroom_area
+      name: "Bedroom"
+
+esp32:
+  board: m5stack-atom
+  framework:
+    type: esp-idf
+    version: recommended
+    advanced:
+      # Frees extra IRAM on the PICO-D4. Remove this if your ESPHome version
+      # rejects the option during validation.
+      sram1_as_iram: true
+
+# --- Connectivity / management ---------------------------------------------
+# These reference entries in your secrets.yaml (wifi_ssid, wifi_password, etc.)
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+logger:
+  # Default level is DEBUG, which is verbose enough to show the WARN-level
+  # on_frame logs further down.
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+  # Recovery hook: if the fan's AC power is gated by an upstream switch (smart
+  # plug, relay, etc.), the fan restores its LED but leaves the motor off after
+  # power returns. Call these actions from an HA automation a few seconds after
+  # power is back to re-transmit the saved state.
+  actions:
+    - action: resend_livingroom_fan_state
+      then:
+        - lambda: 'id(livingroom_fan).resend_state();'
+    - action: resend_bedroom_fan_state
+      then:
+        - lambda: 'id(bedroom_fan).resend_state();'
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# --- CC1101 radio -----------------------------------------------------------
+# Wiring (M5Stack ATOM Lite -> CC1101):
+#   SPI:  SCK=GPIO23, MOSI=GPIO19, MISO=GPIO33
+#   CS:   GPIO25
+#   GDO0: GPIO22  (TX data — the ESP drives modulated data into the CC1101)
+#   GDO2: GPIO21  (RX data — the CC1101 outputs received data to the ESP)
+spi:
+  clk_pin: ${pin_spi_clk}
+  mosi_pin: ${pin_spi_mosi}
+  miso_pin: ${pin_spi_miso}
+  interface: hardware
+
+cc1101:
+  id: cc1101_radio
+  cs_pin: ${pin_cc1101_cs}
+  frequency: 433.92MHz
+  packet_mode: false          # async serial (raw OOK), not packetized
+  modulation_type: ASK/OOK    # Mantra remotes are OOK
+  dc_blocking_filter: true
+  symbol_rate: 5000
+
+# --- RF I/O -----------------------------------------------------------------
+# Reads raw RX data coming out of the CC1101 on GDO2 (GPIO21).
+remote_receiver:
+  id: rf_rx
+  pin:
+    number: ${pin_rf_rx}
+    mode:
+      input: true
+  tolerance: 25%
+  filter: 150us
+  idle: 12ms                  # lower values can duplicate received commands
+
+# Drives the TX data line into the CC1101 on GDO0 (GPIO22).
+remote_transmitter:
+  id: rf_tx
+  pin:
+    number: ${pin_rf_tx}
+    mode:
+      input: true
+      output: true
+      pullup: true
+      open_drain: true        # line idles high; if TX is weak/unreliable, try
+                              # push-pull (remove open_drain/pullup)
+  carrier_duty_percent: 100%
+  non_blocking: true
+  eot_level: false
+  # Dual-pin CC1101: put the radio in TX for the burst, then back to RX.
+  # on_complete fires when the burst actually finishes, so non-blocking TX
+  # is safe here.
+  on_transmit:
+    then:
+      - cc1101.set_idle:
+          id: cc1101_radio
+      - remote_transmitter.digital_write: false
+      - cc1101.begin_tx:
+          id: cc1101_radio
+  on_complete:
+    then:
+      - cc1101.set_idle:
+          id: cc1101_radio
+      - remote_transmitter.digital_write: true
+      - cc1101.begin_rx:
+          id: cc1101_radio
+
+# --- Mantra bridge + entities ----------------------------------------------
+mantra_rf_433:
+  id: rf_bridge
+  receiver_id: rf_rx
+  transmitter_id: rf_tx
+  # One entry per physical fan. `address` is the 2-byte RF address paired
+  # between the original remote and the fan (replace with your own).
+  fans:
+    - id: livingroom_fan
+      address: 0x1A1B
+    - id: bedroom_fan
+      address: 0x2A2B
+
+  # Logs every received Mantra frame — handy for discovering a fan's address.
+  on_frame:
+    then:
+      - logger.log:
+          level: WARN
+          tag: "mantra_rx"
+          format: "frame addr=%04X btn=%02X"
+          args: [x.address, x.button]
+
+# Single light: block — onboard status LED plus the per-fan CCT LEDs.
+light:
+  # ATOM Lite onboard RGB LED, used below as a status indicator.
+  - platform: esp32_rmt_led_strip
+    chipset: WS2812
+    id: onboard_led
+    pin: ${pin_status_led}
+    num_leds: 1
+    rgb_order: RGB
+
+  - platform: status_led
+    id: status_light
+    output: status_led_output
+
+  # Per-fan CCT LEDs.
+  - platform: mantra_rf_433
+    mantra_id: livingroom_fan
+    device_id: livingroom_fan_dev
+    name: "Living Room Fan LED"
+
+  - platform: mantra_rf_433
+    mantra_id: bedroom_fan
+    device_id: bedroom_fan_dev
+    name: "Bedroom Fan LED"
+
+# Drives the onboard RGB LED blue (dim) when the status_led is "on".
+output:
+  - platform: template
+    id: status_led_output
+    type: binary
+    write_action:
+      - if:
+          condition:
+            lambda: return state > 0;
+          then:
+            - light.turn_on:
+                id: onboard_led
+                brightness: 20%
+                red: 0%
+                green: 0%
+                blue: 100%
+                transition_length: 0ms
+          else:
+            - light.turn_off:
+                id: onboard_led
+                transition_length: 0ms
+
+fan:
+  - platform: mantra_rf_433
+    mantra_id: livingroom_fan
+    device_id: livingroom_fan_dev
+    name: "Living Room Fan"
+    # Spanish localisation of the preset mode labels.
+    preset_modes:
+      normal: "Normal"
+      night: "Noche"
+      breeze: "Brisa"
+
+  - platform: mantra_rf_433
+    mantra_id: bedroom_fan
+    device_id: bedroom_fan_dev
+    name: "Bedroom Fan"
