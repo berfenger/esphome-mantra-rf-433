@@ -35,10 +35,6 @@ CONF_LED_FAN = "led_fan"
 CONF_BUTTON = "button"
 CONF_REPEATS = "repeats"
 CONF_ON_FRAME = "on_frame"
-
-# Attribute used by the light / fan platforms to point each entity at the
-# per-fan device. Deliberately not `device_id` — that name is reserved by
-# ESPHome for HA subdevice grouping at the platform level.
 CONF_MANTRA_ID = "mantra_id"
 
 mantra_rf_433_ns = cg.esphome_ns.namespace("mantra_rf_433")
@@ -56,7 +52,7 @@ FAN_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_ID): cv.declare_id(MantraRf433Device),
         cv.Required(CONF_ADDRESS): cv.hex_uint16_t,
-        cv.Optional(CONF_REPEATS, default=4): cv.int_range(min=1, max=32),
+        cv.Optional(CONF_REPEATS, default=9): cv.int_range(min=1, max=32),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -109,7 +105,7 @@ TRANSMIT_SCHEMA = cv.Schema(
         cv.Optional(CONF_FLAGS_K, default=0): cv.templatable(cv.hex_uint8_t),
         cv.Optional(CONF_LED_FAN, default=0): cv.templatable(cv.hex_uint8_t),
         cv.Required(CONF_BUTTON): cv.templatable(cv.hex_uint8_t),
-        cv.Optional(CONF_REPEATS, default=4): cv.templatable(cv.uint8_t),
+        cv.Optional(CONF_REPEATS, default=9): cv.templatable(cv.uint8_t),
     }
 )
 
