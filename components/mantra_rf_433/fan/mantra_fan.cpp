@@ -129,17 +129,27 @@ void MantraFan::control(const fan::FanCall &call) {
     return;
   }
 
+  bool turning_on_from_off = !dev.fan_on;  // want_on is already true here
+
   // Preset mode change (set_fan_mode dedups; forces fan_on for non-Normal,
   // forces speed=1 for Night).
   if (mode_changed) {
     this->parent_->set_fan_mode(want_mode);
   }
 
-  // Speed change forces Normal mode (set_fan_speed dedups).
-  if (call.get_speed().has_value()) {
-    int spd = want_speed > 0 ? want_speed : dev.fan_speed;
-    this->parent_->set_fan_speed(static_cast<uint8_t>(spd));
+  // HA echoes the current speed back on a plain power-on, which would otherwise
+  // route through set_fan_speed() and force Normal mode, dropping a persisted
+  // Night/Breeze preset. Treat the speed as a real change only when it differs
+  // from the persisted speed (a genuine speed press); an incidental echo on a
+  // power-on equals dev.fan_speed.
+  bool explicit_speed_change = call.get_speed().has_value() && want_speed > 0 &&
+                               !(turning_on_from_off && want_speed == dev.fan_speed);
+
+  if (explicit_speed_change) {
+    // Genuine speed press -> exits to Normal mode (mirrors the remote).
+    this->parent_->set_fan_speed(static_cast<uint8_t>(want_speed));
   } else if (!dev.fan_on) {
+    // Power-on from off -> preserve the persisted preset (Night/Breeze).
     this->parent_->set_fan_power(true);
   }
 }

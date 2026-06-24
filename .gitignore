@@ -2,3 +2,9 @@
 .directory
 *.pyc
 __pycache__
+
+# AI tools
+AGENTS.md
+CLAUDE.md
+graphify-out/
+.claude/

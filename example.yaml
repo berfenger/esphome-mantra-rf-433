@@ -56,7 +56,7 @@ mantra_rf_433:
   fans:
     - id: livingroom_fan
       address: 0x1A1B
-      repeats: 4               # optional, default 4
+      repeats: 9               # optional, default 9
     - id: bedroom_fan
       address: 0x2A2B
 
