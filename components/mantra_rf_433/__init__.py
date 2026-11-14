@@ -18,7 +18,7 @@ remote_receiver — it simply registers itself as one more listener.
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
-from esphome.components import remote_receiver, remote_transmitter
+from esphome.components import remote_base, remote_receiver, remote_transmitter
 from esphome.const import CONF_ID, CONF_TRIGGER_ID
 
 CODEOWNERS = ["@berfenger"]
@@ -83,6 +83,9 @@ async def to_code(config):
 
     recv = await cg.get_variable(config[CONF_RECEIVER_ID])
     cg.add(var.set_receiver(recv))
+    # ESPHome >= 2026.10: listener slots are sized at codegen time, so the
+    # bridge must be registered here rather than from C++ setup().
+    remote_base.add_listener(recv, var)
 
     tx = await cg.get_variable(config[CONF_TRANSMITTER_ID])
     cg.add(var.set_transmitter(tx))
