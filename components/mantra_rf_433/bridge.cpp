@@ -8,8 +8,7 @@ namespace mantra_rf_433 {
 static const char *const TAG = "mantra_rf_433";
 
 void MantraRf433Bridge::setup() {
-  if (this->receiver_ != nullptr)
-    this->receiver_->register_listener(this);
+  // The receiver listener is registered from to_code() (remote_base.add_listener).
 }
 
 void MantraRf433Bridge::dump_config() {
